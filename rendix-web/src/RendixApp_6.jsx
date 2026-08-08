@@ -721,6 +721,7 @@ function DashboardScreen({ t, project, projects, saldo, gastado, countGastos, co
 
   return (
     <div className="flex-1 flex flex-col overflow-y-auto pb-20" style={{ backgroundColor: t.bg }}>
+      {/* Encabezado: proyecto activo */}
       <div className="px-5 pt-3 pb-2 flex items-center justify-between">
         <button onClick={onSwitchProject} className="flex items-center gap-1.5 max-w-[85%]">
           <FolderKanban size={15} color={t.teal} />
@@ -730,6 +731,7 @@ function DashboardScreen({ t, project, projects, saldo, gastado, countGastos, co
       </div>
 
       <div className="px-5">
+        {/* Tarjeta de saldo disponible (editable) */}
         <div
           className="rounded-3xl p-5 mb-4"
           style={{ background: `linear-gradient(155deg, ${t.navy}, ${t.navySoft})` }}
@@ -765,6 +767,7 @@ function DashboardScreen({ t, project, projects, saldo, gastado, countGastos, co
           </div>
         </div>
 
+        {/* Contadores navegables: Gastos registrados + Pendientes */}
         <div className="flex gap-3 mb-5">
           <button
             onClick={onGastosClick}
@@ -793,6 +796,7 @@ function DashboardScreen({ t, project, projects, saldo, gastado, countGastos, co
 
       <div className="flex-1" />
 
+      {/* Acción principal */}
       <div className="px-5 pb-3">
         <button
           onClick={onRegistrar}
@@ -806,6 +810,7 @@ function DashboardScreen({ t, project, projects, saldo, gastado, countGastos, co
     </div>
   );
 }
+
 
 /* ==================================================================
    PROJECTS
@@ -1289,3 +1294,4 @@ function ConfirmDeleteModal({ t, onCancel, onConfirm }) {
     </div>
   );
 }
+
