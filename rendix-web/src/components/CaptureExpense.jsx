@@ -1,12 +1,12 @@
 import { useRef, useEffect, useState } from 'react';
-import { X, Camera, FileText, Calendar, DollarSign, Building2, Sparkles } from 'lucide-react';
+import { X, Camera, FileText, Calendar, DollarSign, Building2, Sparkles, AlertTriangle } from 'lucide-react';
 import { useRendix } from '../context/RendixContext';
-import { inputStyle, primaryButtonStyle } from '../theme';
+import { inputStyle, primaryButtonStyle, fmtDate } from '../theme';
 import { subirFotoBoleta } from '../lib/storage';
 import { supabase } from '../lib/supabaseClient';
 
 export const CaptureExpense = ({ onClose, proyecto }) => {
-  const { t, addGasto } = useRendix();
+  const { t, addGasto, buscarGastoDuplicado, buscarGastoSimilar, proyectos } = useRendix();
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const canvasRef = useRef(null);
@@ -20,6 +20,12 @@ export const CaptureExpense = ({ onClose, proyecto }) => {
   const [guardando, setGuardando] = useState(false);
   const [analizando, setAnalizando] = useState(false);
   const [ocrCompleto, setOcrCompleto] = useState(false);
+
+  // Datos que identifican la boleta de forma única (para detectar repetidas).
+  const [folio, setFolio] = useState(null);
+  const [rutEmisor, setRutEmisor] = useState(null);
+  const [duplicado, setDuplicado] = useState(null); // bloquea: misma boleta confirmada
+  const [similar, setSimilar] = useState(null);     // solo advierte: mismo monto/comercio/fecha
 
   // Guardamos si el usuario ya tocó cada campo, para no pisar lo que escribió a mano.
   const camposTocados = useRef({ monto: false, comercio: false, fecha: false, tipo: false });
@@ -52,7 +58,20 @@ export const CaptureExpense = ({ onClose, proyecto }) => {
         if (data.tipo_documento && !camposTocados.current.tipo) {
           setTipo(data.tipo_documento === 'factura' ? 'Factura' : 'Boleta');
         }
+
+        setFolio(data.folio || null);
+        setRutEmisor(data.rut_emisor || null);
         setOcrCompleto(true);
+
+        if (data.folio && data.rut_emisor) {
+          // Caso ideal: la boleta trae folio y RUT, podemos confirmar si es la misma.
+          const repetida = await buscarGastoDuplicado(data.folio, data.rut_emisor);
+          if (repetida) setDuplicado(repetida);
+        } else if (data.monto && data.comercio && data.fecha) {
+          // Boletas sin folio (terminales de pago): solo podemos advertir.
+          const parecido = await buscarGastoSimilar(data.monto, data.comercio, data.fecha);
+          if (parecido) setSimilar(parecido);
+        }
       }
     } catch (err) {
       console.error('No se pudo analizar la boleta automáticamente:', err);
@@ -77,28 +96,44 @@ export const CaptureExpense = ({ onClose, proyecto }) => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     setPhotoTaken(true);
 
-    // Lanzamos el análisis en cuanto tenemos la foto, en paralelo a que el usuario mire la pantalla.
     if (capturada) analizarConIA(capturada);
   };
 
   const handleSave = async () => {
+    if (duplicado) return;
     if (!monto || Number(monto) <= 0) {
       setError('Ingresa un monto válido antes de guardar');
       return;
     }
     setGuardando(true);
     const rutaFoto = fotoDataUrl ? await subirFotoBoleta(fotoDataUrl) : null;
-    await addGasto({
+    const resultado = await addGasto({
       proyectoId: proyecto.id,
       monto,
       comercio,
       fecha,
       tipo_documento: tipo.toLowerCase(),
       fotoUrl: rutaFoto,
+      folio,
+      rutEmisor,
     });
     setGuardando(false);
+
+    // Red de seguridad: si la base rechazó el gasto por repetido, avisamos igual.
+    if (resultado && resultado.duplicado) {
+      setDuplicado({ id: null });
+      return;
+    }
     onClose();
   };
+
+  const nombreProyectoDe = (gasto) => {
+    if (!gasto?.proyectoId) return null;
+    return proyectos.find((p) => p.id === gasto.proyectoId)?.nombre || null;
+  };
+
+  const proyectoDuplicado = nombreProyectoDe(duplicado);
+  const proyectoSimilar = nombreProyectoDe(similar);
 
   if (photoTaken) {
     return (
@@ -107,18 +142,46 @@ export const CaptureExpense = ({ onClose, proyecto }) => {
         style={{ backgroundColor: t.bg }}
       >
         <div
-          className="w-full rounded-3xl p-6 flex flex-col gap-3"
-          style={{ backgroundColor: t.surface, boxShadow: '0 10px 25px rgba(0,0,0,0.15)' }}
+          className="w-full rounded-3xl p-6 flex flex-col gap-3 overflow-y-auto"
+          style={{ backgroundColor: t.surface, boxShadow: '0 10px 25px rgba(0,0,0,0.15)', maxHeight: '92%' }}
         >
           <h2 className="text-[15.5px] font-bold text-center mb-1" style={{ color: t.text }}>Detalles del gasto</h2>
 
-          {analizando && (
+          {duplicado && (
+            <div className="flex items-start gap-2 rounded-xl px-3 py-2.5 mb-1" style={{ backgroundColor: t.redSoft }}>
+              <AlertTriangle size={15} color={t.red} style={{ flexShrink: 0, marginTop: 1 }} />
+              <div>
+                <div className="text-[12.5px] font-bold" style={{ color: t.red }}>Esta boleta ya fue registrada</div>
+                <div className="text-[11.5px] mt-0.5" style={{ color: t.red }}>
+                  {proyectoDuplicado
+                    ? `Ya existe en el proyecto "${proyectoDuplicado}". No se puede subir dos veces.`
+                    : 'No se puede subir la misma boleta dos veces.'}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {similar && !duplicado && (
+            <div className="flex items-start gap-2 rounded-xl px-3 py-2.5 mb-1" style={{ backgroundColor: t.amberSoft }}>
+              <AlertTriangle size={15} color={t.amber} style={{ flexShrink: 0, marginTop: 1 }} />
+              <div>
+                <div className="text-[12.5px] font-bold" style={{ color: t.amber }}>Posible boleta repetida</div>
+                <div className="text-[11.5px] mt-0.5" style={{ color: t.amber }}>
+                  Ya registraste un gasto por el mismo monto en {similar.comercio || 'este comercio'}
+                  {similar.fecha ? ` el ${fmtDate(similar.fecha)}` : ''}
+                  {proyectoSimilar ? ` (proyecto "${proyectoSimilar}")` : ''}. Si es otra compra distinta, puedes guardarla igual.
+                </div>
+              </div>
+            </div>
+          )}
+
+          {analizando && !duplicado && (
             <div className="flex items-center justify-center gap-2 rounded-xl py-2.5 mb-1" style={{ backgroundColor: t.tealSoft }}>
               <Sparkles size={14} color={t.teal} className="animate-pulse" />
               <span className="text-[12.5px] font-semibold" style={{ color: t.teal }}>Leyendo la boleta automáticamente...</span>
             </div>
           )}
-          {ocrCompleto && !analizando && (
+          {ocrCompleto && !analizando && !duplicado && !similar && (
             <div className="flex items-center justify-center gap-2 rounded-xl py-2.5 mb-1" style={{ backgroundColor: t.tealSoft }}>
               <Sparkles size={14} color={t.teal} />
               <span className="text-[12.5px] font-semibold" style={{ color: t.teal }}>Datos completados. Revisa antes de guardar.</span>
@@ -169,22 +232,46 @@ export const CaptureExpense = ({ onClose, proyecto }) => {
             <option value="Factura">Factura</option>
           </select>
 
+          <label className="text-[12px] font-semibold flex items-center gap-1.5 mt-1" style={{ color: t.gray }}>
+            <FileText size={13} /> Folio / N° de documento
+          </label>
+          <input
+            style={inputStyle(t)}
+            type="text"
+            placeholder="No detectado"
+            value={folio || ''}
+            onChange={(e) => setFolio(e.target.value.trim() || null)}
+          />
+
+          <label className="text-[12px] font-semibold flex items-center gap-1.5 mt-1" style={{ color: t.gray }}>
+            <Building2 size={13} /> RUT del emisor
+          </label>
+          <input
+            style={inputStyle(t)}
+            type="text"
+            placeholder="No detectado"
+            value={rutEmisor || ''}
+            onChange={(e) => setRutEmisor(e.target.value.replace(/[^0-9kK]/g, '').toUpperCase() || null)}
+          />
+
           {error && <div className="text-[12.5px] font-medium" style={{ color: t.red }}>{error}</div>}
 
-          <button
-            onClick={handleSave}
-            disabled={guardando}
-            style={{ ...primaryButtonStyle(t, !guardando), marginTop: 8 }}
-          >
-            {guardando ? 'Guardando...' : 'Guardar gasto'}
-          </button>
+          {!duplicado && (
+            <button
+              onClick={handleSave}
+              disabled={guardando || analizando}
+              style={{ ...primaryButtonStyle(t, !guardando && !analizando), marginTop: 8 }}
+            >
+              {guardando ? 'Guardando...' : analizando ? 'Leyendo boleta...' : (similar ? 'Guardar de todas formas' : 'Guardar gasto')}
+            </button>
+          )}
 
           <button
             onClick={onClose}
             className="text-[13px] font-semibold text-center mt-1"
-            style={{ color: t.gray }}
+            style={{ color: duplicado ? t.teal : t.gray }}
           >
-            Cancelar
+            {duplicado ? 'Entendido, cerrar' : 'Cancelar'}
           </button>
         </div>
       </div>
