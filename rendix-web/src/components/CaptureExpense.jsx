@@ -81,15 +81,18 @@ export const CaptureExpense = ({ onClose, proyecto }) => {
     }
   };
 
-  const handleTakePhoto = () => {
+ const handleTakePhoto = () => {
     const video = videoRef.current;
     let capturada = null;
     if (video && video.videoWidth > 0) {
+      // Reducimos la foto antes de enviarla: a resolucion completa pesa varios MB
+      // y viaja dos veces (al servidor y a Google). A 1600px la boleta sigue legible.
+      const escala = Math.min(1, 1600 / video.videoWidth);
       const canvas = canvasRef.current || document.createElement('canvas');
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      canvas.getContext('2d').drawImage(video, 0, 0);
-      capturada = canvas.toDataURL('image/jpeg', 0.85);
+      canvas.width = Math.round(video.videoWidth * escala);
+      canvas.height = Math.round(video.videoHeight * escala);
+      canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+      capturada = canvas.toDataURL('image/jpeg', 0.7);
       setFotoDataUrl(capturada);
     }
 

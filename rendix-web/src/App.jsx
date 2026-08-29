@@ -15,7 +15,7 @@ function AppRoutes() {
   const [vista, setVista] = useState('cargando');
   const [proyectoSeleccionado, setProyectoSeleccionado] = useState(null);
   const [historialFiltro, setHistorialFiltro] = useState('todos');
-  const { proyectos } = useRendix();
+  const { proyectos, nombreUsuario } = useRendix();
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -105,7 +105,7 @@ function AppRoutes() {
 
       {vista === 'perfil' && (
         <Profile
-          user={{ name: 'Usuario RendiFácil', email: 'usuario@rendifacil.cl' }}
+          user={{ name: nombreUsuario }}
           projects={proyectos}
           project={proyectoSeleccionado}
           onLogout={handleLogout}

@@ -22,6 +22,7 @@ const mapGasto = (row) => ({
   monto: Number(row.monto) || 0,
   comercio: row.comercio,
   fecha: row.fecha,
+  hora: row.hora,
   tipo_documento: row.tipo_documento,
   estado: row.estado,
   fotoUrl: row.foto_url,
@@ -43,8 +44,9 @@ export const RendixProvider = ({ children }) => {
     return saved ? JSON.parse(saved) : false;
   });
 
-  // Avatar: ahora vive en Supabase (columna avatar_url de la tabla perfiles).
+  // Avatar y nombre: viven en Supabase (tabla perfiles).
   const [avatar, setAvatarState] = useState(null);
+  const [nombreUsuario, setNombreUsuario] = useState('');
 
   useEffect(() => {
     localStorage.setItem('rendix_dark', JSON.stringify(dark));
@@ -58,6 +60,7 @@ export const RendixProvider = ({ children }) => {
       setProyectosEliminados([]);
       setGastos([]);
       setAvatarState(null);
+      setNombreUsuario('');
       setCargando(false);
       return;
     }
@@ -67,13 +70,15 @@ export const RendixProvider = ({ children }) => {
       supabase.from('proyectos').select('*').is('eliminado_en', null).order('creado_en', { ascending: false }),
       supabase.from('proyectos').select('*').not('eliminado_en', 'is', null).order('eliminado_en', { ascending: false }),
       supabase.from('gastos').select('*').order('creado_en', { ascending: false }),
-      supabase.from('perfiles').select('avatar_url').eq('user_id', user.id).single(),
+      supabase.from('perfiles').select('avatar_url, nombre').eq('user_id', user.id).single(),
     ]);
 
     setProyectos((activosData || []).map(mapProyecto));
     setProyectosEliminados((eliminadosData || []).map(mapProyecto));
     setGastos((gastosData || []).map(mapGasto));
     setAvatarState(perfilData?.avatar_url || null);
+    // Si el perfil no tiene nombre, usamos el que quedó en los datos de registro.
+    setNombreUsuario(perfilData?.nombre || user.user_metadata?.nombre || '');
     setCargando(false);
   }, []);
 
@@ -168,8 +173,6 @@ export const RendixProvider = ({ children }) => {
     return true;
   };
 
- // Segunda capa: para boletas sin folio (terminales de pago), buscamos un gasto
-  // con el mismo monto, comercio y fecha. Esto solo advierte, no bloquea.
   // Busca si el usuario ya registró una boleta con el mismo folio y RUT.
   // Devuelve el gasto encontrado, o null si no hay duplicado.
   const buscarGastoDuplicado = async (folio, rutEmisor) => {
@@ -183,15 +186,22 @@ export const RendixProvider = ({ children }) => {
     if (error || !data || data.length === 0) return null;
     return mapGasto(data[0]);
   };
-  const buscarGastoSimilar = async (monto, comercio, fecha) => {
+
+  // Segunda capa: para boletas sin folio (terminales de pago), buscamos un gasto
+  // con el mismo monto, comercio y fecha. Si ademas coincide la hora, es casi seguro
+  // que es la misma boleta. Esto solo advierte, no bloquea.
+  const buscarGastoSimilar = async (monto, comercio, fecha, hora) => {
     if (!userId || !monto || !comercio || !fecha) return null;
-    const { data, error } = await supabase
+    let consulta = supabase
       .from('gastos')
       .select('*')
       .eq('monto', Number(monto))
       .eq('fecha', fecha)
-      .ilike('comercio', comercio)
-      .limit(1);
+      .ilike('comercio', comercio);
+
+    if (hora) consulta = consulta.eq('hora', hora);
+
+    const { data, error } = await consulta.limit(1);
     if (error || !data || data.length === 0) return null;
     return mapGasto(data[0]);
   };
@@ -206,6 +216,7 @@ export const RendixProvider = ({ children }) => {
         monto: Number(nuevo.monto) || 0,
         comercio: nuevo.comercio || null,
         fecha: nuevo.fecha || null,
+        hora: nuevo.hora || null,
         tipo_documento: nuevo.tipo_documento || null,
         estado: nuevo.estado || 'confirmado',
         foto_url: nuevo.fotoUrl || null,
@@ -251,6 +262,7 @@ export const RendixProvider = ({ children }) => {
         setDark,
         avatar,
         setAvatar,
+        nombreUsuario,
         t,
       }}
     >

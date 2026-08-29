@@ -93,8 +93,9 @@ const Profile = ({ user, onLogout, project, projects, onBack, go }) => {
               </div>
             </button>
             <div>
-              <div className="text-[15px] font-semibold" style={{ color: t.text }}>{user?.name}</div>
-              <div className="text-[12.5px]" style={{ color: t.gray }}>{user?.email}</div>
+              <div className="text-[15px] font-semibold" style={{ color: t.text }}>
+                Usuario: {user?.name || 'Sin nombre'}
+              </div>
             </div>
           </div>
 
