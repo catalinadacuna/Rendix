@@ -44,9 +44,10 @@ export const RendixProvider = ({ children }) => {
     return saved ? JSON.parse(saved) : false;
   });
 
-  // Avatar y nombre: viven en Supabase (tabla perfiles).
+  // Avatar, nombre y correo del administrador: viven en Supabase (tabla perfiles).
   const [avatar, setAvatarState] = useState(null);
   const [nombreUsuario, setNombreUsuario] = useState('');
+  const [correoAdmin, setCorreoAdminState] = useState('');
 
   useEffect(() => {
     localStorage.setItem('rendix_dark', JSON.stringify(dark));
@@ -61,6 +62,7 @@ export const RendixProvider = ({ children }) => {
       setGastos([]);
       setAvatarState(null);
       setNombreUsuario('');
+      setCorreoAdminState('');
       setCargando(false);
       return;
     }
@@ -70,7 +72,7 @@ export const RendixProvider = ({ children }) => {
       supabase.from('proyectos').select('*').is('eliminado_en', null).order('creado_en', { ascending: false }),
       supabase.from('proyectos').select('*').not('eliminado_en', 'is', null).order('eliminado_en', { ascending: false }),
       supabase.from('gastos').select('*').order('creado_en', { ascending: false }),
-      supabase.from('perfiles').select('avatar_url, nombre').eq('user_id', user.id).single(),
+      supabase.from('perfiles').select('avatar_url, nombre, correo_administrador').eq('user_id', user.id).single(),
     ]);
 
     setProyectos((activosData || []).map(mapProyecto));
@@ -79,6 +81,7 @@ export const RendixProvider = ({ children }) => {
     setAvatarState(perfilData?.avatar_url || null);
     // Si el perfil no tiene nombre, usamos el que quedó en los datos de registro.
     setNombreUsuario(perfilData?.nombre || user.user_metadata?.nombre || '');
+    setCorreoAdminState(perfilData?.correo_administrador || '');
     setCargando(false);
   }, []);
 
@@ -95,6 +98,19 @@ export const RendixProvider = ({ children }) => {
     setAvatarState(nuevaRuta);
     if (!userId) return;
     await supabase.from('perfiles').update({ avatar_url: nuevaRuta }).eq('user_id', userId);
+  };
+
+  // Guarda el correo del administrador al que se envian los informes.
+  const guardarCorreoAdmin = async (correo) => {
+    if (!userId) return false;
+    const limpio = (correo || '').trim();
+    const { error } = await supabase
+      .from('perfiles')
+      .update({ correo_administrador: limpio || null })
+      .eq('user_id', userId);
+    if (error) return false;
+    setCorreoAdminState(limpio);
+    return true;
   };
 
   const addProyecto = async (nuevo) => {
@@ -263,6 +279,8 @@ export const RendixProvider = ({ children }) => {
         avatar,
         setAvatar,
         nombreUsuario,
+        correoAdmin,
+        guardarCorreoAdmin,
         t,
       }}
     >

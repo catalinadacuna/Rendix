@@ -1,16 +1,20 @@
 import { useRef, useState, useEffect } from 'react';
-import { LogOut, Moon, Sun, Camera, Image as ImageIcon, Trash2 } from 'lucide-react';
+import { LogOut, Moon, Sun, Camera, Image as ImageIcon, Trash2, Mail, Check } from 'lucide-react';
 import { PhoneFrame } from './PhoneFrame';
 import { useRendix } from '../context/RendixContext';
 import { BottomNav } from './shared';
+import { inputStyle } from '../theme';
 import { subirAvatar, urlTemporal } from '../lib/storage';
 import { supabase } from '../lib/supabaseClient';
 
 const Profile = ({ user, onLogout, project, projects, onBack, go }) => {
-  const { t, dark, setDark, avatar, setAvatar } = useRendix();
+  const { t, dark, setDark, avatar, setAvatar, correoAdmin, guardarCorreoAdmin } = useRendix();
   const [showAvatarOptions, setShowAvatarOptions] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState(null);
   const [subiendo, setSubiendo] = useState(false);
+  const [correoInput, setCorreoInput] = useState('');
+  const [guardandoCorreo, setGuardandoCorreo] = useState(false);
+  const [correoGuardado, setCorreoGuardado] = useState(false);
   const cameraInputRef = useRef(null);
   const galleryInputRef = useRef(null);
 
@@ -28,6 +32,21 @@ const Profile = ({ user, onLogout, project, projects, onBack, go }) => {
     // Si es una ruta interna del bucket, pedirle a Supabase una URL firmada.
     urlTemporal('avatares', avatar).then(setAvatarUrl);
   }, [avatar]);
+
+  // Cargamos el correo guardado en el campo editable.
+  useEffect(() => {
+    setCorreoInput(correoAdmin || '');
+  }, [correoAdmin]);
+
+  const handleGuardarCorreo = async () => {
+    setGuardandoCorreo(true);
+    const ok = await guardarCorreoAdmin(correoInput);
+    setGuardandoCorreo(false);
+    if (ok) {
+      setCorreoGuardado(true);
+      setTimeout(() => setCorreoGuardado(false), 2500);
+    }
+  };
 
   const handleFile = async (e) => {
     const file = e.target.files?.[0];
@@ -52,6 +71,8 @@ const Profile = ({ user, onLogout, project, projects, onBack, go }) => {
     setAvatar(null);
     setShowAvatarOptions(false);
   };
+
+  const hayCambios = (correoInput || '').trim() !== (correoAdmin || '').trim();
 
   return (
     <PhoneFrame>
@@ -97,6 +118,44 @@ const Profile = ({ user, onLogout, project, projects, onBack, go }) => {
                 Usuario: {user?.name || 'Sin nombre'}
               </div>
             </div>
+          </div>
+
+          {/* Correo del administrador */}
+          <div className="rounded-2xl p-4 mb-4" style={{ backgroundColor: t.surface, border: `1px solid ${t.border}` }}>
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <Mail size={14} color={t.teal} />
+              <span className="text-[13px] font-semibold" style={{ color: t.text }}>Correo del administrador</span>
+            </div>
+            <p className="text-[11.5px] mb-2.5" style={{ color: t.gray }}>
+              Ahí llegan los informes que envías desde cada proyecto.
+            </p>
+            <input
+              style={{ ...inputStyle(t), marginBottom: 10 }}
+              type="email"
+              placeholder="jefe@empresa.cl"
+              value={correoInput}
+              onChange={(e) => setCorreoInput(e.target.value)}
+            />
+            <button
+              onClick={handleGuardarCorreo}
+              disabled={guardandoCorreo || !hayCambios}
+              className="w-full py-2.5 rounded-xl font-semibold text-[13px] flex items-center justify-center gap-1.5"
+              style={{
+                backgroundColor: correoGuardado ? t.tealSoft : t.teal,
+                color: correoGuardado ? t.teal : '#fff',
+                opacity: !hayCambios && !correoGuardado ? 0.45 : 1,
+              }}
+            >
+              {correoGuardado ? (
+                <>
+                  <Check size={14} /> Correo guardado
+                </>
+              ) : guardandoCorreo ? (
+                'Guardando...'
+              ) : (
+                'Guardar correo'
+              )}
+            </button>
           </div>
 
           {/* Tarjeta de proyectos */}

@@ -1,19 +1,20 @@
 import { useState } from 'react';
-import { Wallet, Pencil, Camera, ChevronRight, FolderKanban, AlertTriangle, FileDown, CheckCircle2 } from 'lucide-react';
+import { Wallet, Pencil, Camera, ChevronRight, FolderKanban, AlertTriangle, FileDown, CheckCircle2, Mail } from 'lucide-react';
 import { PhoneFrame } from './PhoneFrame';
 import { useRendix } from '../context/RendixContext';
 import { EditBudgetModal } from './EditBudgetModal';
 import { CaptureExpense } from './CaptureExpense';
 import { BottomNav } from './shared';
 import { fmtCLP } from '../theme';
-import { descargarInformeCSV } from '../lib/exportarInforme';
+import { supabase } from '../lib/supabaseClient';
 
 export const Dashboard = ({ onBack, proyecto, go, onGastosClick, onPendientesClick }) => {
-  const { t, gastosPorProyecto, totalGastadoPorProyecto, updateProyecto, marcarInformeEnviado, proyectos } = useRendix();
+  const { t, gastosPorProyecto, totalGastadoPorProyecto, updateProyecto, proyectos, recargar } = useRendix();
   const [showModal, setShowModal] = useState(false);
   const [showCapture, setShowCapture] = useState(false);
   const [enviandoInforme, setEnviandoInforme] = useState(false);
   const [informeRecienEnviado, setInformeRecienEnviado] = useState(false);
+  const [errorInforme, setErrorInforme] = useState('');
 
   const p = proyectos.find(item => item.id === proyecto.id) || proyecto;
 
@@ -34,12 +35,47 @@ export const Dashboard = ({ onBack, proyecto, go, onGastosClick, onPendientesCli
 
   const handleEnviarInforme = async () => {
     if (gastosDelProyecto.length === 0) return;
+    setErrorInforme('');
     setEnviandoInforme(true);
-    descargarInformeCSV(p, gastosDelProyecto);
-    await marcarInformeEnviado(p.id);
+
+    const { data, error } = await supabase.functions.invoke('enviar-informe', {
+      body: { proyectoId: p.id },
+    });
+
     setEnviandoInforme(false);
+
+    // La funcion avisa si falta el correo del administrador.
+    if (data?.error === 'falta_correo_admin') {
+      setErrorInforme(data.mensaje || 'Debes agregar un correo de administrador para enviar informes.');
+      return;
+    }
+
+    if (error || !data?.ok) {
+      setErrorInforme('No se pudo enviar el informe. Intenta de nuevo en unos segundos.');
+      return;
+    }
+
+    // Descargamos tambien una copia local del Excel que se envio.
+    if (data.archivo) {
+      const binario = atob(data.archivo);
+      const bytes = new Uint8Array(binario.length);
+      for (let i = 0; i < binario.length; i++) bytes[i] = binario.charCodeAt(i);
+      const blob = new Blob([bytes], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = data.nombreArchivo || 'Informe.xlsx';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }
+
+    await recargar();
     setInformeRecienEnviado(true);
-    setTimeout(() => setInformeRecienEnviado(false), 3000);
+    setTimeout(() => setInformeRecienEnviado(false), 4000);
   };
 
   return (
@@ -135,6 +171,13 @@ export const Dashboard = ({ onBack, proyecto, go, onGastosClick, onPendientesCli
             Registrar gasto
           </button>
 
+          {errorInforme && (
+            <div className="flex items-start gap-2 rounded-xl px-3 py-2.5 mb-2.5" style={{ backgroundColor: t.redSoft }}>
+              <AlertTriangle size={14} color={t.red} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span className="text-[11.5px] font-medium" style={{ color: t.red }}>{errorInforme}</span>
+            </div>
+          )}
+
           <button
             onClick={handleEnviarInforme}
             disabled={enviandoInforme || gastosDelProyecto.length === 0}
@@ -146,10 +189,15 @@ export const Dashboard = ({ onBack, proyecto, go, onGastosClick, onPendientesCli
               opacity: gastosDelProyecto.length === 0 ? 0.5 : 1,
             }}
           >
-            {informeRecienEnviado ? (
+            {enviandoInforme ? (
+              <>
+                <Mail size={16} />
+                Generando y enviando...
+              </>
+            ) : informeRecienEnviado ? (
               <>
                 <CheckCircle2 size={16} />
-                Informe descargado
+                Informe enviado por correo
               </>
             ) : (
               <>
