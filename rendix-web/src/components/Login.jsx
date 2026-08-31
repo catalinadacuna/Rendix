@@ -54,7 +54,6 @@ export const Login = ({ onLoginSuccess, onGoToCrearCuenta, onGoToRecuperar }) =>
           />
           <h1 className="text-[22px] font-bold" style={{ color: t.navy }}>RendiFácil</h1>
           <p className="text-[13px] mt-1 text-center" style={{ color: t.gray }}>
-            Registra un gasto en 15 segundos.<br />Sin planillas, sin boletas perdidas.
           </p>
         </div>
 
