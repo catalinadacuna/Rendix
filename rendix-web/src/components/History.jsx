@@ -1,9 +1,9 @@
 import { useMemo, useState, useEffect } from 'react';
-import { Search, SlidersHorizontal, Receipt } from 'lucide-react';
+import { Search, SlidersHorizontal, Receipt, Trash2, Lock } from 'lucide-react';
 import { PhoneFrame } from './PhoneFrame';
 import { useRendix } from '../context/RendixContext';
 import { fmtCLP, fmtDate, inputStyle } from '../theme';
-import { StatusBadge, ReceiptThumb, Chip, BottomNav } from './shared';
+import { StatusBadge, ReceiptThumb, Chip, BottomNav, ConfirmModal } from './shared';
 import { urlTemporal } from '../lib/storage';
 
 // Componente que muestra la miniatura del gasto:
@@ -30,14 +30,21 @@ function GastoThumb({ gasto, t }) {
 }
 
 export const History = ({ proyecto, onBack, onOpen, go, initialEstado = 'todos' }) => {
-  const { t, gastosPorProyecto } = useRendix();
+  const { t, gastosPorProyecto, eliminarGasto, proyectos } = useRendix();
 
   const [q, setQ] = useState('');
   const [estado, setEstado] = useState(initialEstado);
   const [tipo, setTipo] = useState('todos');
   const [showFilters, setShowFilters] = useState(initialEstado !== 'todos');
+  const [gastoAEliminar, setGastoAEliminar] = useState(null);
+  const [avisoInformado, setAvisoInformado] = useState(false);
+  const [eliminando, setEliminando] = useState(false);
 
   const gastos = gastosPorProyecto(proyecto.id);
+
+  // Una vez enviado el informe, los gastos quedan congelados para no descuadrarlo.
+  const p = proyectos.find((item) => item.id === proyecto.id) || proyecto;
+  const yaInformado = Boolean(p.informeEnviadoEn);
 
   const filtered = useMemo(() => {
     return gastos
@@ -46,6 +53,14 @@ export const History = ({ proyecto, onBack, onOpen, go, initialEstado = 'todos' 
       .filter((g) => (q ? (g.comercio || '').toLowerCase().includes(q.toLowerCase()) : true))
       .sort((a, b) => (b.creado || 0) - (a.creado || 0));
   }, [gastos, q, estado, tipo]);
+
+  const handleEliminar = async () => {
+    if (!gastoAEliminar) return;
+    setEliminando(true);
+    await eliminarGasto(gastoAEliminar.id);
+    setEliminando(false);
+    setGastoAEliminar(null);
+  };
 
   return (
     <PhoneFrame>
@@ -100,6 +115,15 @@ export const History = ({ proyecto, onBack, onOpen, go, initialEstado = 'todos' 
               </div>
             </div>
           )}
+
+          {yaInformado && (
+            <div className="flex items-center gap-1.5 rounded-xl px-3 py-2 mb-1" style={{ backgroundColor: t.tealSoft }}>
+              <Lock size={12} color={t.teal} />
+              <span className="text-[11px] font-medium" style={{ color: t.teal }}>
+                Informe enviado: los gastos ya no se pueden eliminar
+              </span>
+            </div>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 pb-6">
@@ -111,31 +135,62 @@ export const History = ({ proyecto, onBack, onOpen, go, initialEstado = 'todos' 
             </div>
           ) : (
             filtered.map((g) => (
-              <button
+              <div
                 key={g.id}
-                onClick={() => onOpen?.(g.id)}
-                className="w-full text-left flex items-center gap-3 rounded-2xl p-3 mb-2.5"
+                className="w-full flex items-center gap-3 rounded-2xl p-3 mb-2.5"
                 style={{ backgroundColor: t.surface, border: `1px solid ${t.border}` }}
               >
-                <GastoThumb gasto={g} t={t} />
-                <div className="flex-1 min-w-0">
-                  <div className="text-[13.5px] font-semibold truncate" style={{ color: t.text }}>
-                    {g.comercio || 'Comercio sin identificar'}
+                <button onClick={() => onOpen?.(g.id)} className="flex-1 flex items-center gap-3 text-left min-w-0">
+                  <GastoThumb gasto={g} t={t} />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[13.5px] font-semibold truncate" style={{ color: t.text }}>
+                      {g.comercio || 'Comercio sin identificar'}
+                    </div>
+                    <div className="text-[11.5px]" style={{ color: t.gray }}>
+                      {g.fecha ? fmtDate(g.fecha) : 'Fecha pendiente'}
+                    </div>
                   </div>
-                  <div className="text-[11.5px]" style={{ color: t.gray }}>
-                    {g.fecha ? fmtDate(g.fecha) : 'Fecha pendiente'}
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <span className="text-[14px] font-bold" style={{ color: t.text }}>{fmtCLP(g.monto)}</span>
+                    <StatusBadge estado={g.estado} t={t} />
                   </div>
-                </div>
-                <div className="flex flex-col items-end gap-1">
-                  <span className="text-[14px] font-bold" style={{ color: t.text }}>{fmtCLP(g.monto)}</span>
-                  <StatusBadge estado={g.estado} t={t} />
-                </div>
-              </button>
+                </button>
+                <button
+                  onClick={() => (yaInformado ? setAvisoInformado(true) : setGastoAEliminar(g))}
+                  className="p-2 rounded-full shrink-0"
+                  style={{ color: yaInformado ? t.grayLight : t.gray, opacity: yaInformado ? 0.5 : 1 }}
+                  aria-label="Eliminar boleta"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
             ))
           )}
         </div>
 
         <BottomNav t={t} current="historial" go={go} />
+
+        {gastoAEliminar && (
+          <ConfirmModal
+            t={t}
+            title="¿Eliminar esta boleta?"
+            description={`Se eliminará el gasto de ${gastoAEliminar.comercio || 'este comercio'} por ${fmtCLP(gastoAEliminar.monto)} y su foto se borrará para siempre. Esta acción no se puede deshacer.`}
+            confirmLabel={eliminando ? 'Eliminando...' : 'Sí, eliminar para siempre'}
+            onCancel={() => setGastoAEliminar(null)}
+            onConfirm={handleEliminar}
+          />
+        )}
+
+        {avisoInformado && (
+          <ConfirmModal
+            t={t}
+            title="No se puede eliminar"
+            description="El informe de este proyecto ya fue enviado al administrador. Eliminar una boleta ahora dejaría el informe descuadrado."
+            confirmLabel="Entendido"
+            onCancel={() => setAvisoInformado(false)}
+            onConfirm={() => setAvisoInformado(false)}
+          />
+        )}
       </div>
     </PhoneFrame>
   );

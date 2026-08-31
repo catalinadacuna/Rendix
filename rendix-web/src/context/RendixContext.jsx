@@ -251,6 +251,25 @@ export const RendixProvider = ({ children }) => {
     return gasto;
   };
 
+  // Borra un gasto de forma definitiva: la fila y tambien la foto del Storage.
+  // La base solo lo permite si el proyecto todavia no tiene informe enviado.
+  const eliminarGasto = async (gastoId) => {
+    if (!userId) return false;
+    const gasto = gastos.find((g) => g.id === gastoId);
+    if (!gasto) return false;
+
+    const { error } = await supabase.from('gastos').delete().eq('id', gastoId);
+    if (error) return false;
+
+    // Si la fila se borro bien, quitamos tambien la imagen para no dejar basura.
+    if (gasto.fotoUrl) {
+      await supabase.storage.from('boletas').remove([gasto.fotoUrl]);
+    }
+
+    setGastos((prev) => prev.filter((g) => g.id !== gastoId));
+    return true;
+  };
+
   const gastosPorProyecto = (proyectoId) => gastos.filter((g) => g.proyectoId === proyectoId);
 
   const totalGastadoPorProyecto = (proyectoId) =>
@@ -268,6 +287,7 @@ export const RendixProvider = ({ children }) => {
         marcarInformeEnviado,
         gastos,
         addGasto,
+        eliminarGasto,
         buscarGastoDuplicado,
         buscarGastoSimilar,
         gastosPorProyecto,
