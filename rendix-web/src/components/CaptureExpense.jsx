@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from 'react';
-import { X, Camera, FileText, Calendar, DollarSign, Building2, Sparkles, AlertTriangle } from 'lucide-react';
+import { X, Camera, FileText, Calendar, Clock, DollarSign, Building2, Sparkles, AlertTriangle } from 'lucide-react';
 import { useRendix } from '../context/RendixContext';
 import { inputStyle, primaryButtonStyle, fmtDate } from '../theme';
 import { subirFotoBoleta } from '../lib/storage';
@@ -24,8 +24,9 @@ export const CaptureExpense = ({ onClose, proyecto }) => {
   // Datos que identifican la boleta de forma única (para detectar repetidas).
   const [folio, setFolio] = useState(null);
   const [rutEmisor, setRutEmisor] = useState(null);
+  const [hora, setHora] = useState(null);
   const [duplicado, setDuplicado] = useState(null); // bloquea: misma boleta confirmada
-  const [similar, setSimilar] = useState(null);     // solo advierte: mismo monto/comercio/fecha
+  const [similar, setSimilar] = useState(null);     // solo advierte: mismo monto/comercio/fecha/hora
 
   // Guardamos si el usuario ya tocó cada campo, para no pisar lo que escribió a mano.
   const camposTocados = useRef({ monto: false, comercio: false, fecha: false, tipo: false });
@@ -55,12 +56,14 @@ export const CaptureExpense = ({ onClose, proyecto }) => {
         if (data.monto && !camposTocados.current.monto) setMonto(String(data.monto));
         if (data.comercio && !camposTocados.current.comercio) setComercio(data.comercio);
         if (data.fecha && !camposTocados.current.fecha) setFecha(data.fecha);
-        if (data.tipo_documento && !camposTocados.current.tipo) {
+        if (!camposTocados.current.tipo) {
+          // Si el OCR no lo determina, dejamos "Boleta" que es lo mas comun.
           setTipo(data.tipo_documento === 'factura' ? 'Factura' : 'Boleta');
         }
 
         setFolio(data.folio || null);
         setRutEmisor(data.rut_emisor || null);
+        setHora(data.hora || null);
         setOcrCompleto(true);
 
         if (data.folio && data.rut_emisor) {
@@ -69,7 +72,7 @@ export const CaptureExpense = ({ onClose, proyecto }) => {
           if (repetida) setDuplicado(repetida);
         } else if (data.monto && data.comercio && data.fecha) {
           // Boletas sin folio (terminales de pago): solo podemos advertir.
-          const parecido = await buscarGastoSimilar(data.monto, data.comercio, data.fecha);
+          const parecido = await buscarGastoSimilar(data.monto, data.comercio, data.fecha, data.hora);
           if (parecido) setSimilar(parecido);
         }
       }
@@ -81,7 +84,7 @@ export const CaptureExpense = ({ onClose, proyecto }) => {
     }
   };
 
- const handleTakePhoto = () => {
+  const handleTakePhoto = () => {
     const video = videoRef.current;
     let capturada = null;
     if (video && video.videoWidth > 0) {
@@ -119,6 +122,7 @@ export const CaptureExpense = ({ onClose, proyecto }) => {
       fotoUrl: rutaFoto,
       folio,
       rutEmisor,
+      hora,
     });
     setGuardando(false);
 
@@ -221,6 +225,17 @@ export const CaptureExpense = ({ onClose, proyecto }) => {
             type="date"
             value={fecha}
             onChange={(e) => { setFecha(e.target.value); camposTocados.current.fecha = true; }}
+          />
+
+          <label className="text-[12px] font-semibold flex items-center gap-1.5 mt-1" style={{ color: t.gray }}>
+            <Clock size={13} /> Hora
+          </label>
+          <input
+            style={inputStyle(t)}
+            type="time"
+            step="1"
+            value={hora || ''}
+            onChange={(e) => setHora(e.target.value || null)}
           />
 
           <label className="text-[12px] font-semibold flex items-center gap-1.5 mt-1" style={{ color: t.gray }}>

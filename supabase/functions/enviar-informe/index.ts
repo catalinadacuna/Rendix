@@ -154,12 +154,11 @@ Deno.serve(async (req) => {
           extension: "jpeg",
         });
 
-        // Anclamos la imagen a la celda completa: asi nunca se desborda a la fila de abajo.
+        // La celda mide ~300x400 px: dejamos la imagen algo mas chica para que quepa dentro.
         fila.height = 300;
         hoja.addImage(idImagen, {
-          tl: { col: 5, row: fila.number - 1 },
-          br: { col: 6, row: fila.number },
-          editAs: "oneCell",
+          tl: { col: 5.05, row: fila.number - 1 + 0.01 },
+          ext: { width: 270, height: 310 },
         });
       } catch (_e) {
         fila.getCell("foto").value = "Sin foto";
