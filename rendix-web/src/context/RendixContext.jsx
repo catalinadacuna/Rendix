@@ -1,8 +1,26 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { getTheme } from '../theme';
+import { getTheme, SKINS, DEFAULT_SKIN, esSkinValido } from '../theme';
 import { supabase } from '../lib/supabaseClient';
 
 const RendixContext = createContext();
+
+// Lee el skin guardado en el dispositivo. Sirve como caché para que la app
+// se pinte al instante al abrir, sin esperar la consulta a Supabase.
+// Si no hay nada guardado, migra la preferencia antigua de modo oscuro.
+const skinInicial = () => {
+  const guardado = localStorage.getItem('rendix_skin');
+  if (guardado && esSkinValido(guardado)) return guardado;
+
+  const modoOscuroViejo = localStorage.getItem('rendix_dark');
+  if (modoOscuroViejo !== null) {
+    try {
+      return JSON.parse(modoOscuroViejo) ? 'noche' : 'clasico';
+    } catch {
+      // valor corrupto: lo ignoramos y usamos el skin por defecto
+    }
+  }
+  return DEFAULT_SKIN;
+};
 
 const mapProyecto = (row) => ({
   id: row.id,
@@ -38,20 +56,21 @@ export const RendixProvider = ({ children }) => {
   const [cargando, setCargando] = useState(true);
   const [userId, setUserId] = useState(null);
 
-  // Modo oscuro: sigue en localStorage porque es preferencia del dispositivo.
-  const [dark, setDark] = useState(() => {
-    const saved = localStorage.getItem('rendix_dark');
-    return saved ? JSON.parse(saved) : false;
-  });
+  // Skin de la app. Vive en Supabase (tabla perfiles) para que siga al usuario
+  // en cualquier dispositivo; localStorage es solo caché de arranque.
+  const [skin, setSkinState] = useState(skinInicial);
 
   // Avatar, nombre y correo del administrador: viven en Supabase (tabla perfiles).
   const [avatar, setAvatarState] = useState(null);
   const [nombreUsuario, setNombreUsuario] = useState('');
   const [correoAdmin, setCorreoAdminState] = useState('');
 
+  // Cada vez que cambia el skin, lo dejamos en el dispositivo y limpiamos
+  // la preferencia antigua de modo oscuro, que ya no se usa.
   useEffect(() => {
-    localStorage.setItem('rendix_dark', JSON.stringify(dark));
-  }, [dark]);
+    localStorage.setItem('rendix_skin', skin);
+    localStorage.removeItem('rendix_dark');
+  }, [skin]);
 
   const cargarDatos = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -72,7 +91,7 @@ export const RendixProvider = ({ children }) => {
       supabase.from('proyectos').select('*').is('eliminado_en', null).order('creado_en', { ascending: false }),
       supabase.from('proyectos').select('*').not('eliminado_en', 'is', null).order('eliminado_en', { ascending: false }),
       supabase.from('gastos').select('*').order('creado_en', { ascending: false }),
-      supabase.from('perfiles').select('avatar_url, nombre, correo_administrador').eq('user_id', user.id).single(),
+      supabase.from('perfiles').select('avatar_url, nombre, correo_administrador, skin').eq('user_id', user.id).single(),
     ]);
 
     setProyectos((activosData || []).map(mapProyecto));
@@ -82,6 +101,12 @@ export const RendixProvider = ({ children }) => {
     // Si el perfil no tiene nombre, usamos el que quedó en los datos de registro.
     setNombreUsuario(perfilData?.nombre || user.user_metadata?.nombre || '');
     setCorreoAdminState(perfilData?.correo_administrador || '');
+
+    // El skin guardado en la cuenta manda por sobre el del dispositivo.
+    if (perfilData?.skin && esSkinValido(perfilData.skin)) {
+      setSkinState(perfilData.skin);
+    }
+
     setCargando(false);
   }, []);
 
@@ -91,7 +116,22 @@ export const RendixProvider = ({ children }) => {
     return () => listener.subscription.unsubscribe();
   }, [cargarDatos]);
 
-  const t = getTheme(dark);
+  const skinActual = SKINS[skin] || SKINS[DEFAULT_SKIN];
+  const t = getTheme(skin);
+  // `dark` ya no es una preferencia propia: se deriva del skin elegido.
+  const dark = skinActual.dark;
+
+  // Cambia el skin: se aplica al instante y se guarda en la cuenta.
+  const setSkin = async (nuevoSkin) => {
+    if (!esSkinValido(nuevoSkin) || nuevoSkin === skin) return;
+    setSkinState(nuevoSkin);
+    if (!userId) return;
+    await supabase.from('perfiles').update({ skin: nuevoSkin }).eq('user_id', userId);
+  };
+
+  // Compatibilidad: si algún componente todavía llama setDark(true/false),
+  // lo traducimos al skin equivalente en vez de romperse.
+  const setDark = (valor) => setSkin(valor ? 'noche' : 'clasico');
 
   // Actualiza el avatar tanto en el estado local como en la tabla perfiles.
   const setAvatar = async (nuevaRuta) => {
@@ -294,6 +334,9 @@ export const RendixProvider = ({ children }) => {
         totalGastadoPorProyecto,
         cargando,
         recargar: cargarDatos,
+        skin,
+        setSkin,
+        skinActual,
         dark,
         setDark,
         avatar,

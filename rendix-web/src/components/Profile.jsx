@@ -1,15 +1,17 @@
 import { useRef, useState, useEffect } from 'react';
-import { LogOut, Moon, Sun, Camera, Image as ImageIcon, Trash2, Mail, Check } from 'lucide-react';
+import { LogOut, Palette, Camera, Image as ImageIcon, Trash2, Mail, Check } from 'lucide-react';
 import { PhoneFrame } from './PhoneFrame';
 import { useRendix } from '../context/RendixContext';
 import { BottomNav } from './shared';
-import { inputStyle } from '../theme';
+import { inputStyle, swatchesDe } from '../theme';
+import { SkinPicker } from './SkinPicker';
 import { subirAvatar, urlTemporal } from '../lib/storage';
 import { supabase } from '../lib/supabaseClient';
 
 const Profile = ({ user, onLogout, project, projects, onBack, go }) => {
-  const { t, dark, setDark, avatar, setAvatar, correoAdmin, guardarCorreoAdmin } = useRendix();
+  const { t, skinActual, avatar, setAvatar, correoAdmin, guardarCorreoAdmin } = useRendix();
   const [showAvatarOptions, setShowAvatarOptions] = useState(false);
+  const [showSkinPicker, setShowSkinPicker] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState(null);
   const [subiendo, setSubiendo] = useState(false);
   const [correoInput, setCorreoInput] = useState('');
@@ -142,7 +144,7 @@ const Profile = ({ user, onLogout, project, projects, onBack, go }) => {
               className="w-full py-2.5 rounded-xl font-semibold text-[13px] flex items-center justify-center gap-1.5"
               style={{
                 backgroundColor: correoGuardado ? t.tealSoft : t.teal,
-                color: correoGuardado ? t.teal : '#fff',
+                color: correoGuardado ? t.teal : t.onAccent || '#fff',
                 opacity: !hayCambios && !correoGuardado ? 0.45 : 1,
               }}
             >
@@ -170,18 +172,33 @@ const Profile = ({ user, onLogout, project, projects, onBack, go }) => {
             </div>
           </div>
 
-          {/* Toggle modo oscuro */}
+          {/* Personaliza tu app — reemplaza al antiguo toggle de modo oscuro */}
           <button
-            onClick={() => setDark(!dark)}
+            onClick={() => setShowSkinPicker(true)}
             className="w-full flex items-center justify-between rounded-2xl p-4 mb-3"
             style={{ backgroundColor: t.surface, border: `1px solid ${t.border}` }}
           >
             <div className="flex items-center gap-2.5">
-              {dark ? <Sun size={17} color={t.amber} /> : <Moon size={17} color={t.navy} />}
-              <span className="text-[13.5px] font-semibold" style={{ color: t.text }}>Modo oscuro</span>
+              <Palette size={17} color={t.teal} />
+              <div className="text-left">
+                <div className="text-[13.5px] font-semibold" style={{ color: t.text }}>Personaliza tu app</div>
+                <div className="text-[11px]" style={{ color: t.gray }}>{skinActual?.nombre}</div>
+              </div>
             </div>
-            <div className="rounded-full" style={{ width: 38, height: 22, backgroundColor: dark ? t.teal : t.border, position: 'relative' }}>
-              <div className="rounded-full bg-white absolute top-0.5" style={{ width: 18, height: 18, left: dark ? 18 : 2, transition: 'left .15s' }} />
+            <div className="flex shrink-0">
+              {swatchesDe(skinActual).map((color, i) => (
+                <div
+                  key={i}
+                  style={{
+                    width: 13,
+                    height: 22,
+                    backgroundColor: color,
+                    marginLeft: i === 0 ? 0 : -5,
+                    borderRadius: 4,
+                    border: '1px solid rgba(0,0,0,.12)',
+                  }}
+                />
+              ))}
             </div>
           </button>
 
@@ -213,6 +230,8 @@ const Profile = ({ user, onLogout, project, projects, onBack, go }) => {
           style={{ display: 'none' }}
           onChange={handleFile}
         />
+
+        {showSkinPicker && <SkinPicker onClose={() => setShowSkinPicker(false)} />}
 
         {showAvatarOptions && (
           <div className="absolute inset-0 z-50 flex items-end" style={{ backgroundColor: '#00000066' }}>
