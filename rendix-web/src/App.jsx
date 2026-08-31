@@ -71,7 +71,7 @@ function AppRoutes() {
             setVista('dashboard');
           }}
           onAddNew={() => setVista('crear-proyecto')}
-          onBack={handleLogout}
+          onLogout={handleLogout}
           onGoToTrash={() => setVista('papelera')}
         />
       )}

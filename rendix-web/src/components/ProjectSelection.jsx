@@ -1,13 +1,14 @@
 import { useState } from 'react';
-import { FolderKanban, Plus, Trash2 } from 'lucide-react';
+import { FolderKanban, Plus, Trash2, LogOut } from 'lucide-react';
 import { PhoneFrame } from './PhoneFrame';
 import { useRendix } from '../context/RendixContext';
 import { ConfirmModal } from './shared';
 
-export const ProjectSelection = ({ onSelectProject, onAddNew, onBack, onGoToTrash }) => {
+export const ProjectSelection = ({ onSelectProject, onAddNew, onLogout, onGoToTrash }) => {
   const { t, proyectos, proyectosEliminados, deleteProyecto } = useRendix();
   const [proyectoAEliminar, setProyectoAEliminar] = useState(null);
   const [proyectoSinInforme, setProyectoSinInforme] = useState(null);
+  const [confirmarSalida, setConfirmarSalida] = useState(false);
 
   return (
     <PhoneFrame>
@@ -16,11 +17,18 @@ export const ProjectSelection = ({ onSelectProject, onAddNew, onBack, onGoToTras
           className="flex items-center px-3"
           style={{ height: 56, backgroundColor: t.surface, borderBottom: `1px solid ${t.border}` }}
         >
-          <button onClick={onBack} className="p-2 -ml-1 rounded-full" style={{ color: t.text }} aria-label="Volver">
-            &lt;
+          {/* Esta es la primera pantalla tras el login: no hay "atrás", solo salir. */}
+          <button
+            onClick={() => setConfirmarSalida(true)}
+            className="flex items-center gap-1.5 shrink-0"
+            style={{ color: t.red, width: 72 }}
+            aria-label="Cerrar sesión"
+          >
+            <LogOut size={16} />
+            <span className="text-[13px] font-semibold">Salir</span>
           </button>
           <span className="flex-1 text-center text-[15px] font-semibold" style={{ color: t.text }}>Tus proyectos</span>
-          <div style={{ width: 32 }} />
+          <div className="shrink-0" style={{ width: 72 }} />
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4">
@@ -92,6 +100,17 @@ export const ProjectSelection = ({ onSelectProject, onAddNew, onBack, onGoToTras
             </span>
           </button>
         </div>
+
+        {confirmarSalida && (
+          <ConfirmModal
+            t={t}
+            title="¿Salir de la app?"
+            description="Se cerrará tu sesión y tendrás que ingresar tu correo y contraseña para volver a entrar."
+            confirmLabel="Salir"
+            onCancel={() => setConfirmarSalida(false)}
+            onConfirm={onLogout}
+          />
+        )}
 
         {proyectoSinInforme && (
           <ConfirmModal
