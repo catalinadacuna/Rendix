@@ -64,9 +64,9 @@ export const History = ({ proyecto, onBack, onOpen, go, initialEstado = 'todos' 
 
   return (
     <PhoneFrame>
-      <div className="flex-1 flex flex-col" style={{ backgroundColor: t.bg }}>
+      <div className="flex-1 flex flex-col" style={{ backgroundColor: t.bg, minHeight: 0 }}>
         <div
-          className="flex items-center px-3"
+          className="flex items-center px-3 shrink-0"
           style={{ height: 56, backgroundColor: t.surface, borderBottom: `1px solid ${t.border}` }}
         >
           <button onClick={onBack} className="p-2 -ml-1 rounded-full" style={{ color: t.text }} aria-label="Volver">
@@ -76,7 +76,7 @@ export const History = ({ proyecto, onBack, onOpen, go, initialEstado = 'todos' 
           <div style={{ width: 32 }} />
         </div>
 
-        <div className="px-5 pt-4 pb-2">
+        <div className="px-5 pt-4 pb-2 shrink-0">
           <div className="flex items-center gap-2 mb-3">
             <div className="flex-1 flex items-center gap-2 rounded-xl px-3" style={{ ...inputStyle(t), padding: '9px 12px' }}>
               <Search size={15} color={t.gray} />
@@ -126,7 +126,12 @@ export const History = ({ proyecto, onBack, onOpen, go, initialEstado = 'todos' 
           )}
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 pb-6">
+        {/* minHeight: 0 es lo que activa el scroll: sin esto el contenedor crece
+            con la lista completa en vez de encogerse y desplazarse. */}
+        <div
+          className="flex-1 overflow-y-auto px-5 pb-6"
+          style={{ minHeight: 0, WebkitOverflowScrolling: 'touch' }}
+        >
           {filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-center">
               <Receipt size={30} color={t.grayLight} />

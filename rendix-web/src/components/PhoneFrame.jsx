@@ -1,8 +1,8 @@
 import { useRendix } from '../context/RendixContext';
 
 export const PhoneFrame = ({ children }) => {
-  const { t } = useRendix();
-  const isDark = t.bg === "#0E1524";
+  const { t, skinActual } = useRendix();
+  const isDark = Boolean(skinActual?.dark);
 
   return (
     <div
@@ -18,13 +18,18 @@ export const PhoneFrame = ({ children }) => {
         style={{
           width: 375,
           height: 780,
+          // Si la ventana es más baja que el marco, el teléfono se achica en vez
+          // de quedar cortado fuera de la pantalla. Los 56px son el padding de arriba y abajo.
+          maxHeight: "calc(100vh - 56px)",
           backgroundColor: t.bg,
           borderRadius: 44,
           boxShadow: "0 30px 60px -20px rgba(0,0,0,0.45)",
           border: `10px solid ${isDark ? "#000" : "#1B1F27"}`,
         }}
       >
-        <div className="flex-1 flex flex-col relative overflow-hidden">
+        {/* minHeight: 0 permite que este contenedor se encoja y que el scroll
+            interno de cada pantalla funcione. Sin esto, crece con el contenido. */}
+        <div className="flex-1 flex flex-col relative overflow-hidden" style={{ minHeight: 0 }}>
           {children}
         </div>
       </div>
