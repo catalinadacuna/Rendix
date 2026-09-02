@@ -1,9 +1,17 @@
-import ExcelJS from "npm:exceljs@4.4.0";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+const MODELO = "gemini-3.6-flash";
+const GEMINI_URL =
+  "https://generativelanguage.googleapis.com/v1beta/models/" +
+  MODELO +
+  ":generateContent?key=" +
+  GEMINI_API_KEY;
+
+const MAX_INTENTOS = 3;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -11,16 +19,167 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-function fmtCLP(valor) {
-  const n = Number(valor) || 0;
-  return "$" + n.toLocaleString("es-CL");
+const PROMPT = [
+  "Eres un asistente que lee boletas y facturas chilenas. Analiza la imagen y devuelve SOLO un JSON valido, sin texto adicional y sin markdown, con esta estructura exacta:",
+  '{"monto": 0, "comercio": "", "fecha": "YYYY-MM-DD", "hora": "HH:MM:SS", "tipo_documento": "", "folio": "", "rut_emisor": ""}',
+  "",
+  "Donde:",
+  "- monto: numero entero del total en pesos chilenos, sin puntos ni simbolos.",
+  "- comercio: nombre del comercio o negocio.",
+  "- fecha: formato YYYY-MM-DD.",
+  "- hora: la hora impresa en la boleta, formato HH:MM:SS de 24 horas. Si solo aparecen hora y minutos, usa 00 en los segundos. Si no hay hora impresa, devuelve null.",
+  "- tipo_documento: boleta o factura.",
+  "- folio: el identificador unico del documento. SOLO devuelvelo si aparece junto a una de estas etiquetas: Folio, Recibo N, N de operacion, Comprobante, Nro, Numero. Copialo completo tal cual esta impreso, puede tener letras, numeros y guiones (por ejemplo MT7MZNNT-71156).",
+  "- REGLA IMPORTANTE DEL FOLIO: si no encuentras ninguna de esas etiquetas, devuelve null. NO uses numeros sueltos, codigos de autorizacion, numeros de tarjeta, ni cualquier otro numero que veas en el papel. Es preferible devolver null antes que un numero equivocado.",
+  "- rut_emisor: el RUT del comercio que emite el documento. Copia digito por digito con maxima atencion, incluyendo el digito verificador final. Un solo digito mal leido invalida el dato.",
+  "",
+  "Si no puedes leer algun dato con certeza, usa null en ese campo. No inventes datos, especialmente el folio y el RUT.",
+].join("\n");
+
+function esperar(ms) {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
-function fmtFecha(valor) {
-  if (!valor) return "Sin fecha";
-  const partes = String(valor).split("-");
-  if (partes.length !== 3) return String(valor);
-  return partes[2] + "-" + partes[1] + "-" + partes[0];
+function limpiarMonto(valor) {
+  if (typeof valor === "number" && isFinite(valor)) return Math.round(valor);
+  if (typeof valor === "string") {
+    const soloDigitos = valor.replace(/[^0-9]/g, "");
+    if (soloDigitos.length > 0) return parseInt(soloDigitos, 10);
+  }
+  return null;
+}
+
+function limpiarTexto(valor) {
+  if (typeof valor !== "string") return null;
+  const limpio = valor.trim();
+  return limpio.length > 0 ? limpio : null;
+}
+
+function limpiarFecha(valor) {
+  if (typeof valor !== "string") return null;
+  const partes = valor.trim().split("-");
+  if (partes.length !== 3) return null;
+  const mes = partes[1].padStart(2, "0");
+  const dia = partes[2].padStart(2, "0");
+  if (!/^\d{2}$/.test(mes) || !/^\d{2}$/.test(dia)) return null;
+  if (parseInt(mes, 10) < 1 || parseInt(mes, 10) > 12) return null;
+  if (parseInt(dia, 10) < 1 || parseInt(dia, 10) > 31) return null;
+  return new Date().getFullYear() + "-" + mes + "-" + dia;
+}
+
+// Acepta la hora solo si viene en formato valido. Admite HH:MM y le agrega los segundos.
+function limpiarHora(valor) {
+  if (typeof valor !== "string") return null;
+  const partes = valor.trim().split(":");
+  if (partes.length < 2 || partes.length > 3) return null;
+  const hh = partes[0].padStart(2, "0");
+  const mm = partes[1].padStart(2, "0");
+  const ss = (partes[2] || "00").padStart(2, "0");
+  if (!/^\d{2}$/.test(hh) || !/^\d{2}$/.test(mm) || !/^\d{2}$/.test(ss)) return null;
+  if (parseInt(hh, 10) > 23 || parseInt(mm, 10) > 59 || parseInt(ss, 10) > 59) return null;
+  return hh + ":" + mm + ":" + ss;
+}
+
+function limpiarTipo(valor) {
+  const texto = limpiarTexto(valor);
+  if (!texto) return null;
+  const min = texto.toLowerCase();
+  if (min.includes("factura")) return "factura";
+  if (min.includes("boleta")) return "boleta";
+  return null;
+}
+
+// Calcula el digito verificador de un RUT chileno (modulo 11).
+function digitoVerificador(cuerpo) {
+  let suma = 0;
+  let multiplo = 2;
+  for (let i = cuerpo.length - 1; i >= 0; i--) {
+    suma += parseInt(cuerpo[i], 10) * multiplo;
+    multiplo = multiplo === 7 ? 2 : multiplo + 1;
+  }
+  const resto = 11 - (suma % 11);
+  if (resto === 11) return "0";
+  if (resto === 10) return "K";
+  return String(resto);
+}
+
+// Solo acepta el RUT si el digito verificador calza. Asi descartamos lecturas erroneas del OCR.
+function limpiarRut(valor) {
+  if (valor === null || valor === undefined) return null;
+  const bruto = String(valor).toUpperCase().replace(/[^0-9K]/g, "");
+  if (bruto.length < 8 || bruto.length > 9) return null;
+
+  const cuerpo = bruto.slice(0, -1);
+  const dv = bruto.slice(-1);
+  if (!/^\d+$/.test(cuerpo)) return null;
+
+  if (digitoVerificador(cuerpo) !== dv) {
+    console.warn("RUT descartado por digito verificador invalido: " + bruto);
+    return null;
+  }
+  return bruto;
+}
+
+function limpiarFolio(valor) {
+  if (valor === null || valor === undefined) return null;
+  const bruto = String(valor).toUpperCase().replace(/[^0-9A-Z]/g, "");
+  const sinCeros = bruto.replace(/^0+/, "");
+  if (sinCeros.length < 4) return null;
+  return sinCeros;
+}
+
+async function llamarGemini(base64Limpio) {
+  let ultimaData = null;
+
+  for (let intento = 1; intento <= MAX_INTENTOS; intento++) {
+    const respuesta = await fetch(GEMINI_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              { text: PROMPT },
+              {
+                inline_data: {
+                  mime_type: "image/jpeg",
+                  data: base64Limpio,
+                },
+              },
+            ],
+          },
+        ],
+        generationConfig: {
+          temperature: 0,
+          responseMimeType: "application/json",
+        },
+      }),
+    });
+
+    const data = await respuesta.json();
+
+    if (respuesta.ok) return { ok: true, data };
+
+    ultimaData = data;
+    const recuperable = respuesta.status === 429 || respuesta.status === 503;
+
+    console.error(
+      "Gemini fallo (intento " +
+        intento +
+        "/" +
+        MAX_INTENTOS +
+        ", status " +
+        respuesta.status +
+        "): " +
+        JSON.stringify(data),
+    );
+
+    if (!recuperable || intento === MAX_INTENTOS) break;
+
+    await esperar(intento * 1000);
+  }
+
+  return { ok: false, data: ultimaData };
 }
 
 Deno.serve(async (req) => {
@@ -29,15 +188,13 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // 1. Verificamos quien esta pidiendo el informe con su propio token.
+    // Cada lectura consume cuota de Gemini, asi que solo la puede pedir un usuario
+    // autenticado. Se valida el token ANTES de tocar la imagen o llamar a Gemini.
     const authHeader = req.headers.get("Authorization") || "";
-    const supabaseUser = createClient(SUPABASE_URL, SERVICE_ROLE, {
-      global: { headers: { Authorization: authHeader } },
-    });
+    const token = authHeader.replace("Bearer ", "");
 
-    const { data: { user }, error: errorUser } = await supabaseUser.auth.getUser(
-      authHeader.replace("Bearer ", ""),
-    );
+    const db = createClient(SUPABASE_URL, SERVICE_ROLE);
+    const { data: { user }, error: errorUser } = await db.auth.getUser(token);
 
     if (errorUser || !user) {
       return new Response(JSON.stringify({ error: "No autorizado" }), {
@@ -46,207 +203,89 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { proyectoId } = await req.json();
-    if (!proyectoId) {
-      return new Response(JSON.stringify({ error: "Falta el proyecto" }), {
+    const { imagenBase64 } = await req.json();
+
+    if (!imagenBase64) {
+      return new Response(JSON.stringify({ error: "Falta la imagen" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Cliente con permisos de servicio para leer datos y fotos.
-    const db = createClient(SUPABASE_URL, SERVICE_ROLE);
+    const base64Limpio = imagenBase64.includes(",")
+      ? imagenBase64.split(",")[1]
+      : imagenBase64;
 
-    // 2. Traemos el perfil, el proyecto y sus gastos.
-    const [{ data: perfil }, { data: proyecto }, { data: gastos }] = await Promise.all([
-      db.from("perfiles").select("nombre, correo_administrador").eq("user_id", user.id).single(),
-      db.from("proyectos").select("*").eq("id", proyectoId).eq("owner_id", user.id).single(),
-      db.from("gastos").select("*").eq("proyecto_id", proyectoId).eq("owner_id", user.id).order("fecha", { ascending: true }),
-    ]);
+    const pesoKb = Math.round((base64Limpio.length * 3) / 4 / 1024);
+    const inicio = Date.now();
 
-    if (!proyecto) {
-      return new Response(JSON.stringify({ error: "Proyecto no encontrado" }), {
-        status: 404,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    const respuesta = await llamarGemini(base64Limpio);
 
-    const correoAdmin = perfil?.correo_administrador;
-    if (!correoAdmin) {
+    console.info(
+      "Usuario: " + user.id + " — Imagen: " + pesoKb + " KB — Gemini tardo: " +
+        (Date.now() - inicio) + " ms",
+    );
+
+    if (!respuesta.ok) {
       return new Response(
         JSON.stringify({
-          error: "falta_correo_admin",
-          mensaje: "Debes agregar un correo de administrador en tu perfil antes de enviar informes.",
+          error:
+            "El lector no esta disponible en este momento. Ingresa los datos a mano o intenta de nuevo en unos segundos.",
         }),
         {
-          status: 400,
+          status: 503,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         },
       );
     }
 
-    const lista = gastos || [];
-    const totalGastado = lista.reduce((s, g) => s + (Number(g.monto) || 0), 0);
+    const textoRespuesta =
+      respuesta.data.candidates?.[0]?.content?.parts?.[0]?.text;
 
-    // 3. Armamos el Excel.
-    const libro = new ExcelJS.Workbook();
-    libro.creator = "RendiFacil";
-    libro.created = new Date();
-    const hoja = libro.addWorksheet("Rendicion");
-
-    hoja.columns = [
-      { header: "Comercio", key: "comercio", width: 32 },
-      { header: "Fecha", key: "fecha", width: 14 },
-      { header: "Monto", key: "monto", width: 16 },
-      { header: "Tipo de documento", key: "tipo", width: 20 },
-      { header: "Estado", key: "estado", width: 14 },
-      { header: "Boleta", key: "foto", width: 42 },
-    ];
-
-    // Encabezado con los datos del proyecto.
-    hoja.spliceRows(1, 0,
-      ["Informe de rendicion - " + (proyecto.nombre || "")],
-      ["Cliente: " + (proyecto.cliente || "-")],
-      ["Presupuesto: " + fmtCLP(proyecto.presupuesto)],
-      ["Total gastado: " + fmtCLP(totalGastado)],
-      ["Saldo disponible: " + fmtCLP((Number(proyecto.presupuesto) || 0) - totalGastado)],
-      ["Generado por: " + (perfil?.nombre || user.email)],
-      [],
-    );
-
-    hoja.getRow(1).font = { bold: true, size: 14 };
-    const filaEncabezado = 8;
-    hoja.getRow(filaEncabezado).fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: "FF1B2A4A" },
-    };
-    hoja.getRow(filaEncabezado).font = { bold: true, color: { argb: "FFFFFFFF" } };
-
-    // 4. Una fila por gasto, con la foto incrustada.
-    for (let i = 0; i < lista.length; i++) {
-      const g = lista[i];
-      const fila = hoja.addRow({
-        comercio: g.comercio || "Sin identificar",
-        fecha: fmtFecha(g.fecha),
-        monto: Number(g.monto) || 0,
-        tipo: g.tipo_documento || "-",
-        estado: g.estado === "confirmado" ? "Confirmado" : "Diferido",
-        foto: "",
-      });
-      fila.getCell("monto").numFmt = '"$"#,##0';
-      fila.alignment = { vertical: "middle" };
-
-      if (!g.foto_url) {
-        fila.getCell("foto").value = "Sin foto";
-        continue;
-      }
-
-      try {
-        const { data: archivo } = await db.storage.from("boletas").download(g.foto_url);
-        if (!archivo) {
-          fila.getCell("foto").value = "Sin foto";
-          continue;
-        }
-        const buffer = await archivo.arrayBuffer();
-        const idImagen = libro.addImage({
-          buffer: buffer,
-          extension: "jpeg",
-        });
-
-        // La celda mide ~300x400 px: dejamos la imagen algo mas chica para que quepa dentro.
-        fila.height = 300;
-        hoja.addImage(idImagen, {
-          tl: { col: 5.05, row: fila.number - 1 + 0.01 },
-          ext: { width: 270, height: 310 },
-        });
-      } catch (_e) {
-        fila.getCell("foto").value = "Sin foto";
-      }
-    }
-
-    const bufferExcel = await libro.xlsx.writeBuffer();
-
-    // 5. Convertimos a base64 para adjuntarlo al correo.
-    const bytes = new Uint8Array(bufferExcel);
-    let binario = "";
-    const bloque = 8192;
-    for (let i = 0; i < bytes.length; i += bloque) {
-      binario += String.fromCharCode.apply(null, bytes.subarray(i, i + bloque));
-    }
-    const base64 = btoa(binario);
-
-    const nombreArchivo = "Informe - " + (proyecto.nombre || "proyecto") + ".xlsx";
-
-    // 6. Enviamos el correo a los dos destinatarios.
-    const destinatarios = [user.email, correoAdmin].filter(Boolean);
-
-    const cuerpoCorreo = [
-      "<h2>Informe de rendicion</h2>",
-      "<p><b>Proyecto:</b> " + (proyecto.nombre || "-") + "</p>",
-      "<p><b>Cliente:</b> " + (proyecto.cliente || "-") + "</p>",
-      "<p><b>Presupuesto:</b> " + fmtCLP(proyecto.presupuesto) + "</p>",
-      "<p><b>Total gastado:</b> " + fmtCLP(totalGastado) + "</p>",
-      "<p><b>Saldo disponible:</b> " + fmtCLP((Number(proyecto.presupuesto) || 0) - totalGastado) + "</p>",
-      "<p><b>Gastos registrados:</b> " + lista.length + "</p>",
-      "<p>Adjuntamos el detalle completo con las fotos de cada boleta.</p>",
-      "<p>Enviado automaticamente por RendiFacil.</p>",
-    ].join("");
-
-    const respuestaResend = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: "Bearer " + RESEND_API_KEY,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: "RendiFacil <noreply@rendifacil.cl>",
-        to: destinatarios,
-        subject: "Informe de rendicion - " + (proyecto.nombre || ""),
-        html: cuerpoCorreo,
-        attachments: [
-          {
-            filename: nombreArchivo,
-            content: base64,
-          },
-        ],
-      }),
-    });
-
-    const datosResend = await respuestaResend.json();
-
-    if (!respuestaResend.ok) {
-      console.error("Error de Resend:", JSON.stringify(datosResend));
+    if (!textoRespuesta) {
+      console.error("Respuesta sin texto:", JSON.stringify(respuesta.data));
       return new Response(
-        JSON.stringify({ error: "No se pudo enviar el correo" }),
+        JSON.stringify({ error: "No se pudo leer la boleta. Ingresa los datos a mano." }),
         {
-          status: 500,
+          status: 422,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         },
       );
     }
 
-    // 7. Marcamos el proyecto como informado.
-    await db
-      .from("proyectos")
-      .update({ informe_enviado_en: new Date().toISOString() })
-      .eq("id", proyectoId);
+    let crudo;
+    try {
+      crudo = JSON.parse(textoRespuesta);
+    } catch (_e) {
+      console.error("JSON invalido de Gemini: " + textoRespuesta);
+      return new Response(
+        JSON.stringify({ error: "No se pudo leer la boleta. Ingresa los datos a mano." }),
+        {
+          status: 422,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
 
-    console.info("Informe enviado a: " + destinatarios.join(", "));
+    const resultado = {
+      monto: limpiarMonto(crudo.monto),
+      comercio: limpiarTexto(crudo.comercio),
+      fecha: limpiarFecha(crudo.fecha),
+      hora: limpiarHora(crudo.hora),
+      tipo_documento: limpiarTipo(crudo.tipo_documento),
+      folio: limpiarFolio(crudo.folio),
+      rut_emisor: limpiarRut(crudo.rut_emisor),
+    };
 
-    return new Response(
-      JSON.stringify({
-        ok: true,
-        enviadoA: destinatarios,
-        archivo: base64,
-        nombreArchivo: nombreArchivo,
-      }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
+    console.info("Resultado: " + JSON.stringify(resultado));
+
+    return new Response(JSON.stringify(resultado), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   } catch (error) {
-    console.error("Error en enviar-informe:", error);
+    console.error("Error en la funcion:", error);
     return new Response(
-      JSON.stringify({ error: "No se pudo generar el informe" }),
+      JSON.stringify({ error: "No se pudo procesar la boleta" }),
       {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
