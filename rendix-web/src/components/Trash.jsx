@@ -19,7 +19,7 @@ export const Trash = ({ onBack }) => {
 
   return (
     <PhoneFrame>
-      <div className="flex-1 flex flex-col" style={{ backgroundColor: t.bg }}>
+      <div className="flex-1 flex flex-col" style={{ backgroundColor: t.bg, minHeight: 0 }}>
         <div
           className="flex items-center px-3"
           style={{ height: 56, backgroundColor: t.surface, borderBottom: `1px solid ${t.border}` }}
@@ -37,7 +37,7 @@ export const Trash = ({ onBack }) => {
           </p>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 pb-6">
+        <div className="flex-1 overflow-y-auto px-5 pb-6" style={{ minHeight: 0 }}>
           {proyectosEliminados.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-center">
               <Clock size={30} color={t.grayLight} />

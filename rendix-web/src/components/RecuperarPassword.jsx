@@ -76,7 +76,7 @@ export const RecuperarPassword = ({ onBack, onRecovered }) => {
 
   return (
     <PhoneFrame>
-      <div className="flex-1 flex flex-col px-7 py-6" style={{ backgroundColor: t.bg }}>
+      <div className="flex-1 flex flex-col px-7 py-6 overflow-y-auto" style={{ backgroundColor: t.bg, minHeight: 0 }}>
         <button onClick={onBack} className="p-1 -ml-1 mb-5 rounded-full self-start" style={{ color: t.text }} aria-label="Volver">
           &lt;
         </button>

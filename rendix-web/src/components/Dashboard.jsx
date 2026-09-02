@@ -80,7 +80,7 @@ export const Dashboard = ({ onBack, proyecto, go, onGastosClick, onPendientesCli
 
   return (
     <PhoneFrame>
-      <div key={p.presupuesto} className="flex-1 flex flex-col overflow-y-auto pb-4" style={{ backgroundColor: t.bg }}>
+      <div key={p.presupuesto} className="flex-1 flex flex-col overflow-y-auto pb-4" style={{ backgroundColor: t.bg, minHeight: 0 }}>
 
         {/* Encabezado: proyecto activo */}
         <div className="px-5 pt-3 pb-2 flex items-center gap-1.5">

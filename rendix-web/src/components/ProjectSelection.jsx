@@ -12,7 +12,7 @@ export const ProjectSelection = ({ onSelectProject, onAddNew, onLogout, onGoToTr
 
   return (
     <PhoneFrame>
-      <div className="flex-1 flex flex-col" style={{ backgroundColor: t.bg }}>
+      <div className="flex-1 flex flex-col" style={{ backgroundColor: t.bg, minHeight: 0 }}>
         <div
           className="flex items-center px-3"
           style={{ height: 56, backgroundColor: t.surface, borderBottom: `1px solid ${t.border}` }}
@@ -31,7 +31,7 @@ export const ProjectSelection = ({ onSelectProject, onAddNew, onLogout, onGoToTr
           <div className="shrink-0" style={{ width: 72 }} />
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+        <div className="flex-1 overflow-y-auto px-5 py-4" style={{ minHeight: 0 }}>
           {proyectos.length === 0 ? (
             <p className="text-center text-[13px] mt-6" style={{ color: t.gray }}>
               Aún no tienes proyectos. Crea el primero para empezar a registrar gastos.
