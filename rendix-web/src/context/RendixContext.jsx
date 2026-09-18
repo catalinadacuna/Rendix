@@ -46,6 +46,9 @@ const mapGasto = (row) => ({
   fotoUrl: row.foto_url,
   folio: row.folio,
   rutEmisor: row.rut_emisor,
+  // Marca de rendicion: si tiene fecha, el gasto ya salio en un informe y
+  // queda congelado (no se puede editar ni borrar).
+  informadoEn: row.informado_en,
   creado: new Date(row.creado_en).getTime(),
 });
 
@@ -284,7 +287,11 @@ export const RendixProvider = ({ children }) => {
     if (error) {
       // 23505 = el índice único de la base rechazó la boleta por repetida.
       if (error.code === '23505') return { duplicado: true };
-      return null;
+      // Cualquier otro rechazo (por ejemplo, una política de RLS) se devuelve
+      // con su mensaje, para que la pantalla pueda avisarle al usuario en vez
+      // de cerrarse como si hubiera guardado.
+      console.error('addGasto rechazado:', error);
+      return { error: error.message || 'No se pudo guardar el gasto' };
     }
     const gasto = mapGasto(data);
     setGastos((prev) => [gasto, ...prev]);
@@ -299,7 +306,10 @@ export const RendixProvider = ({ children }) => {
     if (!gasto) return false;
 
     const { error } = await supabase.from('gastos').delete().eq('id', gastoId);
-    if (error) return false;
+    if (error) {
+      console.error('eliminarGasto rechazado:', error);
+      return false;
+    }
 
     // Si la fila se borro bien, quitamos tambien la imagen para no dejar basura.
     if (gasto.fotoUrl) {

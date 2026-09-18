@@ -50,6 +50,12 @@ export const Dashboard = ({ onBack, proyecto, go, onGastosClick, onPendientesCli
       return;
     }
 
+    // Cada informe rinde solo las boletas nuevas: si no hay ninguna, avisamos.
+    if (data?.error === 'sin_gastos_nuevos') {
+      setErrorInforme(data.mensaje || 'No hay boletas nuevas por rendir.');
+      return;
+    }
+
     if (error || !data?.ok) {
       setErrorInforme('No se pudo enviar el informe. Intenta de nuevo en unos segundos.');
       return;

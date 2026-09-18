@@ -112,6 +112,7 @@ export const CaptureExpense = ({ onClose, proyecto }) => {
       return;
     }
     setGuardando(true);
+    setError('');
     const rutaFoto = fotoDataUrl ? await subirFotoBoleta(fotoDataUrl) : null;
     const resultado = await addGasto({
       proyectoId: proyecto.id,
@@ -131,6 +132,18 @@ export const CaptureExpense = ({ onClose, proyecto }) => {
       setDuplicado({ id: null });
       return;
     }
+
+    // Si el gasto no se guardó, avisamos en pantalla en vez de cerrar como si
+    // todo hubiera salido bien, y borramos la foto que ya se había subido para
+    // no dejarla huérfana en el Storage.
+    if (!resultado || resultado.error || !resultado.id) {
+      if (rutaFoto) {
+        await supabase.storage.from('boletas').remove([rutaFoto]);
+      }
+      setError(resultado?.error || 'No se pudo guardar el gasto. Intenta de nuevo.');
+      return;
+    }
+
     onClose();
   };
 
@@ -241,14 +254,27 @@ export const CaptureExpense = ({ onClose, proyecto }) => {
           <label className="text-[12px] font-semibold flex items-center gap-1.5 mt-1" style={{ color: t.gray }}>
             <FileText size={13} /> Tipo de documento
           </label>
-          <select
-            style={inputStyle(t)}
-            value={tipo}
-            onChange={(e) => { setTipo(e.target.value); camposTocados.current.tipo = true; }}
-          >
-            <option value="Boleta">Boleta</option>
-            <option value="Factura">Factura</option>
-          </select>
+          <div className="flex gap-2">
+            {['Boleta', 'Factura'].map((opcion) => {
+              const activo = tipo === opcion;
+              return (
+                <button
+                  key={opcion}
+                  type="button"
+                  onClick={() => { setTipo(opcion); camposTocados.current.tipo = true; }}
+                  className="flex-1 py-3 rounded-xl text-[14px] font-semibold"
+                  style={{
+                    backgroundColor: activo ? t.teal : t.bg,
+                    color: activo ? (t.onAccent || '#fff') : t.text,
+                    border: `1.5px solid ${activo ? t.teal : t.border}`,
+                  }}
+                  aria-pressed={activo}
+                >
+                  {opcion}
+                </button>
+              );
+            })}
+          </div>
 
           <label className="text-[12px] font-semibold flex items-center gap-1.5 mt-1" style={{ color: t.gray }}>
             <FileText size={13} /> Folio / N° de documento

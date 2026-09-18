@@ -30,7 +30,7 @@ function GastoThumb({ gasto, t }) {
 }
 
 export const History = ({ proyecto, onBack, onOpen, go, initialEstado = 'todos' }) => {
-  const { t, gastosPorProyecto, eliminarGasto, proyectos } = useRendix();
+  const { t, gastosPorProyecto, eliminarGasto } = useRendix();
 
   const [q, setQ] = useState('');
   const [estado, setEstado] = useState(initialEstado);
@@ -42,9 +42,9 @@ export const History = ({ proyecto, onBack, onOpen, go, initialEstado = 'todos' 
 
   const gastos = gastosPorProyecto(proyecto.id);
 
-  // Una vez enviado el informe, los gastos quedan congelados para no descuadrarlo.
-  const p = proyectos.find((item) => item.id === proyecto.id) || proyecto;
-  const yaInformado = Boolean(p.informeEnviadoEn);
+  // Cada gasto se congela cuando sale en un informe, no cuando el proyecto
+  // recibe uno: el proyecto sigue abierto y admite boletas nuevas.
+  const rendidos = gastos.filter((g) => Boolean(g.informadoEn)).length;
 
   const filtered = useMemo(() => {
     return gastos
@@ -116,11 +116,13 @@ export const History = ({ proyecto, onBack, onOpen, go, initialEstado = 'todos' 
             </div>
           )}
 
-          {yaInformado && (
+          {rendidos > 0 && (
             <div className="flex items-center gap-1.5 rounded-xl px-3 py-2 mb-1" style={{ backgroundColor: t.tealSoft }}>
               <Lock size={12} color={t.teal} />
               <span className="text-[11px] font-medium" style={{ color: t.teal }}>
-                Informe enviado: los gastos ya no se pueden eliminar
+                {rendidos === 1
+                  ? '1 boleta ya rendida: no se puede eliminar'
+                  : rendidos + ' boletas ya rendidas: no se pueden eliminar'}
               </span>
             </div>
           )}
@@ -161,12 +163,12 @@ export const History = ({ proyecto, onBack, onOpen, go, initialEstado = 'todos' 
                   </div>
                 </button>
                 <button
-                  onClick={() => (yaInformado ? setAvisoInformado(true) : setGastoAEliminar(g))}
+                  onClick={() => (g.informadoEn ? setAvisoInformado(true) : setGastoAEliminar(g))}
                   className="p-2 rounded-full shrink-0"
-                  style={{ color: yaInformado ? t.grayLight : t.gray, opacity: yaInformado ? 0.5 : 1 }}
-                  aria-label="Eliminar boleta"
+                  style={{ color: g.informadoEn ? t.grayLight : t.gray, opacity: g.informadoEn ? 0.5 : 1 }}
+                  aria-label={g.informadoEn ? 'Boleta ya rendida' : 'Eliminar boleta'}
                 >
-                  <Trash2 size={16} />
+                  {g.informadoEn ? <Lock size={16} /> : <Trash2 size={16} />}
                 </button>
               </div>
             ))
@@ -189,8 +191,8 @@ export const History = ({ proyecto, onBack, onOpen, go, initialEstado = 'todos' 
         {avisoInformado && (
           <ConfirmModal
             t={t}
-            title="No se puede eliminar"
-            description="El informe de este proyecto ya fue enviado al administrador. Eliminar una boleta ahora dejaría el informe descuadrado."
+            title="Esta boleta ya fue rendida"
+            description="Esta boleta ya salió en un informe enviado al administrador, así que no se puede eliminar ni editar. Las boletas que registres de ahora en adelante sí puedes corregirlas hasta el próximo informe."
             confirmLabel="Entendido"
             onCancel={() => setAvisoInformado(false)}
             onConfirm={() => setAvisoInformado(false)}

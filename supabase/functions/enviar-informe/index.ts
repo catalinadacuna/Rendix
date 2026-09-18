@@ -23,6 +23,14 @@ function fmtFecha(valor) {
   return partes[2] + "-" + partes[1] + "-" + partes[0];
 }
 
+// Fecha de hoy en formato DD-MM-YYYY, para el nombre del archivo.
+function fechaHoy() {
+  const d = new Date();
+  const dia = String(d.getDate()).padStart(2, "0");
+  const mes = String(d.getMonth() + 1).padStart(2, "0");
+  return dia + "-" + mes + "-" + d.getFullYear();
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -57,15 +65,25 @@ Deno.serve(async (req) => {
     // Cliente con permisos de servicio para leer datos y fotos.
     const db = createClient(SUPABASE_URL, SERVICE_ROLE);
 
-    // 2. Traemos el perfil, el proyecto y sus gastos.
-    // El filtro owner_id es la comprobacion de propiedad: con la service_role key
-    // el RLS no se aplica, asi que si no filtramos aqui cualquiera podria pedir
-    // el informe de un proyecto ajeno mandando su id.
-    const [{ data: perfil }, { data: proyecto }, { data: gastos }] = await Promise.all([
-      db.from("perfiles").select("nombre, correo_administrador").eq("user_id", user.id).single(),
-      db.from("proyectos").select("*").eq("id", proyectoId).eq("owner_id", user.id).single(),
-      db.from("gastos").select("*").eq("proyecto_id", proyectoId).eq("owner_id", user.id).order("fecha", { ascending: true }),
-    ]);
+    // 2. Traemos el perfil, el proyecto, los gastos de ESTA rendicion y el
+    //    total acumulado del proyecto.
+    //    El filtro owner_id es la comprobacion de propiedad: con la service_role
+    //    key el RLS no se aplica, asi que sin ese filtro cualquiera podria pedir
+    //    el informe de un proyecto ajeno mandando su id.
+    //    `informado_en is null` deja solo lo que todavia no se ha rendido.
+    const [{ data: perfil }, { data: proyecto }, { data: gastos }, { data: todos }] =
+      await Promise.all([
+        db.from("perfiles").select("nombre, correo_administrador").eq("user_id", user.id).single(),
+        db.from("proyectos").select("*").eq("id", proyectoId).eq("owner_id", user.id).single(),
+        db.from("gastos").select("*")
+          .eq("proyecto_id", proyectoId)
+          .eq("owner_id", user.id)
+          .is("informado_en", null)
+          .order("fecha", { ascending: true }),
+        db.from("gastos").select("monto")
+          .eq("proyecto_id", proyectoId)
+          .eq("owner_id", user.id),
+      ]);
 
     if (!proyecto) {
       return new Response(JSON.stringify({ error: "Proyecto no encontrado" }), {
@@ -89,9 +107,28 @@ Deno.serve(async (req) => {
     }
 
     const lista = gastos || [];
-    const totalGastado = lista.reduce((s, g) => s + (Number(g.monto) || 0), 0);
 
-    // 3. Armamos el Excel.
+    // 3. Sin gastos nuevos no hay nada que rendir: avisamos en vez de mandar
+    //    un Excel vacio al administrador.
+    if (lista.length === 0) {
+      return new Response(
+        JSON.stringify({
+          error: "sin_gastos_nuevos",
+          mensaje: "No hay boletas nuevas por rendir. Registra al menos una antes de enviar el informe.",
+        }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    const totalRendicion = lista.reduce((s, g) => s + (Number(g.monto) || 0), 0);
+    const totalAcumulado = (todos || []).reduce((s, g) => s + (Number(g.monto) || 0), 0);
+    const presupuesto = Number(proyecto.presupuesto) || 0;
+    const saldoDisponible = presupuesto - totalAcumulado;
+
+    // 4. Armamos el Excel.
     const libro = new ExcelJS.Workbook();
     libro.creator = "RendiFacil";
     libro.created = new Date();
@@ -106,19 +143,22 @@ Deno.serve(async (req) => {
       { header: "Boleta", key: "foto", width: 42 },
     ];
 
-    // Encabezado con los datos del proyecto.
+    // Encabezado con los datos del proyecto. Son 8 filas (7 de texto + 1 vacia),
+    // asi que la fila de titulos de columna queda en la 9.
     hoja.spliceRows(1, 0,
       ["Informe de rendicion - " + (proyecto.nombre || "")],
       ["Cliente: " + (proyecto.cliente || "-")],
-      ["Presupuesto: " + fmtCLP(proyecto.presupuesto)],
-      ["Total gastado: " + fmtCLP(totalGastado)],
-      ["Saldo disponible: " + fmtCLP((Number(proyecto.presupuesto) || 0) - totalGastado)],
-      ["Generado por: " + (perfil?.nombre || user.email)],
+      ["Presupuesto: " + fmtCLP(presupuesto)],
+      ["Total de esta rendicion: " + fmtCLP(totalRendicion) + "  (" + lista.length + " boletas)"],
+      ["Total gastado acumulado: " + fmtCLP(totalAcumulado)],
+      ["Saldo disponible: " + fmtCLP(saldoDisponible)],
+      ["Generado por: " + (perfil?.nombre || user.email) + "  -  " + fechaHoy()],
       [],
     );
 
     hoja.getRow(1).font = { bold: true, size: 14 };
-    const filaEncabezado = 8;
+    hoja.getRow(4).font = { bold: true };
+    const filaEncabezado = 9;
     hoja.getRow(filaEncabezado).fill = {
       type: "pattern",
       pattern: "solid",
@@ -126,7 +166,7 @@ Deno.serve(async (req) => {
     };
     hoja.getRow(filaEncabezado).font = { bold: true, color: { argb: "FFFFFFFF" } };
 
-    // 4. Una fila por gasto, con la foto incrustada.
+    // 5. Una fila por gasto, con la foto incrustada.
     for (let i = 0; i < lista.length; i++) {
       const g = lista[i];
       const fila = hoja.addRow({
@@ -170,7 +210,7 @@ Deno.serve(async (req) => {
 
     const bufferExcel = await libro.xlsx.writeBuffer();
 
-    // 5. Convertimos a base64 para adjuntarlo al correo.
+    // 6. Convertimos a base64 para adjuntarlo al correo.
     const bytes = new Uint8Array(bufferExcel);
     let binario = "";
     const bloque = 8192;
@@ -179,20 +219,21 @@ Deno.serve(async (req) => {
     }
     const base64 = btoa(binario);
 
-    const nombreArchivo = "Informe - " + (proyecto.nombre || "proyecto") + ".xlsx";
+    // La fecha en el nombre evita que una rendicion pise a la anterior en el correo.
+    const nombreArchivo = "Informe - " + (proyecto.nombre || "proyecto") + " - " + fechaHoy() + ".xlsx";
 
-    // 6. Enviamos el correo a los dos destinatarios.
+    // 7. Enviamos el correo a los dos destinatarios.
     const destinatarios = [user.email, correoAdmin].filter(Boolean);
 
     const cuerpoCorreo = [
       "<h2>Informe de rendicion</h2>",
       "<p><b>Proyecto:</b> " + (proyecto.nombre || "-") + "</p>",
       "<p><b>Cliente:</b> " + (proyecto.cliente || "-") + "</p>",
-      "<p><b>Presupuesto:</b> " + fmtCLP(proyecto.presupuesto) + "</p>",
-      "<p><b>Total gastado:</b> " + fmtCLP(totalGastado) + "</p>",
-      "<p><b>Saldo disponible:</b> " + fmtCLP((Number(proyecto.presupuesto) || 0) - totalGastado) + "</p>",
-      "<p><b>Gastos registrados:</b> " + lista.length + "</p>",
-      "<p>Adjuntamos el detalle completo con las fotos de cada boleta.</p>",
+      "<p><b>Presupuesto:</b> " + fmtCLP(presupuesto) + "</p>",
+      "<p><b>Total de esta rendicion:</b> " + fmtCLP(totalRendicion) + " (" + lista.length + " boletas)</p>",
+      "<p><b>Total gastado acumulado:</b> " + fmtCLP(totalAcumulado) + "</p>",
+      "<p><b>Saldo disponible:</b> " + fmtCLP(saldoDisponible) + "</p>",
+      "<p>Adjuntamos el detalle de esta rendicion con las fotos de cada boleta.</p>",
       "<p>Enviado automaticamente por RendiFacil.</p>",
     ].join("");
 
@@ -205,7 +246,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         from: "RendiFacil <noreply@rendifacil.cl>",
         to: destinatarios,
-        subject: "Informe de rendicion - " + (proyecto.nombre || ""),
+        subject: "Informe de rendicion - " + (proyecto.nombre || "") + " - " + fechaHoy(),
         html: cuerpoCorreo,
         attachments: [
           {
@@ -229,16 +270,29 @@ Deno.serve(async (req) => {
       );
     }
 
-    // 7. Marcamos el proyecto como informado.
-    // Repetimos el filtro de propiedad: aunque arriba ya se comprobo, dejarlo aqui
-    // evita que un cambio futuro en el orden del codigo abra un agujero.
+    // 8. Recien ahora que el correo salio, marcamos como rendidos SOLO los gastos
+    //    que fueron en este informe. Quedan congelados: no se pueden editar ni
+    //    borrar. Los que se registren despues nacen libres otra vez.
+    const ahora = new Date().toISOString();
+    const idsRendidos = lista.map((g) => g.id);
+
+    await db
+      .from("gastos")
+      .update({ informado_en: ahora })
+      .in("id", idsRendidos);
+
+    // Guardamos ademas la fecha del ultimo informe en el proyecto.
+    // Repetimos el filtro de propiedad para que la consulta se defienda sola.
     await db
       .from("proyectos")
-      .update({ informe_enviado_en: new Date().toISOString() })
+      .update({ informe_enviado_en: ahora })
       .eq("id", proyectoId)
       .eq("owner_id", user.id);
 
-    console.info("Informe enviado a: " + destinatarios.join(", "));
+    console.info(
+      "Informe enviado a: " + destinatarios.join(", ") +
+        " — boletas rendidas: " + idsRendidos.length,
+    );
 
     return new Response(
       JSON.stringify({
@@ -246,6 +300,7 @@ Deno.serve(async (req) => {
         enviadoA: destinatarios,
         archivo: base64,
         nombreArchivo: nombreArchivo,
+        boletasRendidas: idsRendidos.length,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
