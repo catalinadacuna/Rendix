@@ -94,13 +94,18 @@ Deno.serve(async (req) => {
 
     const correoAdmin = perfil?.correo_administrador;
     if (!correoAdmin) {
+      // Se responde con 200 a proposito: supabase.functions.invoke trata
+      // cualquier codigo distinto de 200 como error de red y no le entrega el
+      // cuerpo a la app, asi que el mensaje nunca llegaria a la pantalla.
+      // Los errores reales (401, 404) si conservan su codigo.
       return new Response(
         JSON.stringify({
+          ok: false,
           error: "falta_correo_admin",
           mensaje: "Debes agregar un correo de administrador en tu perfil antes de enviar informes.",
         }),
         {
-          status: 400,
+          status: 200,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         },
       );
@@ -111,13 +116,15 @@ Deno.serve(async (req) => {
     // 3. Sin gastos nuevos no hay nada que rendir: avisamos en vez de mandar
     //    un Excel vacio al administrador.
     if (lista.length === 0) {
+      // Mismo motivo que arriba: 200 para que la app pueda leer el mensaje.
       return new Response(
         JSON.stringify({
+          ok: false,
           error: "sin_gastos_nuevos",
           mensaje: "No hay boletas nuevas por rendir. Registra al menos una antes de enviar el informe.",
         }),
         {
-          status: 400,
+          status: 200,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         },
       );
